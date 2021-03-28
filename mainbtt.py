@@ -93,7 +93,7 @@ def main():
                                  .replace("False", '"False"')
                                  .replace("True", '"True"')
                                  .replace("None", '"None"'))["isActive"])
-                time.sleep(2)
+                time.sleep(10)
             #           ORDINE SELL FILLATO O CANCELLATO, PROCEDO A METTERE BUY
 
             a = str(client_u.get_account_list(currency="BTC", account_type="trade")[0]).replace("'", r'"')
