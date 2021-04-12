@@ -1,0 +1,285 @@
+import datetime
+import decimal
+import json
+import time
+import urllib3
+import requests
+from colorama import Fore
+from colorama import Style
+from binance import exceptions
+import binance.exceptions
+from trade import Operation
+from binance.client import Client
+
+# max(round(all_balance["bnbtrx"] * sell_perc), sell)
+# max(round(all_balance["bnbtrx"] * sell_perc), sell)
+# max(round(all_balance["bnbtrx"] * sell_perc), sell)
+
+def main():
+    coin = "trx"
+    sell_perc = 0.1
+    buy_perc = 0.1
+    pair = "TRXBNB"
+    d = dict()
+    with open("keydict.txt", "r") as f:
+        j=json.loads(str(f.read()))
+        exchange_list = ["bnb"]
+    key = j["key"]
+    secret = j["secret"]
+    #op = Operation(exchange_list, apikey_bnb=key, secret_bnb=secret, pair="TRXBNB")
+    #op.threadCreation()
+    time.sleep(5)
+    client = Client(j["key"],j['secret'])
+    partially=0
+    while True:
+        try:
+            print("INIZIO")
+            order_id_sell = ""
+            while order_id_sell == "":
+                try:
+                    alt_balance = float(client.get_asset_balance(asset="TRX")["free"])
+                    btc_balance = float(client.get_asset_balance(asset="BNB")["free"])
+                    if alt_balance < float(j['sell']):
+                        print("LOW BALANCE, ATTENDO 30 SECONDI")
+                        time.sleep(30)
+                        continue
+                    try:
+                        resp_bnb = client.get_order_book(symbol=pair, limit=5)
+                    except requests.exceptions.ConnectionError:
+                        print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                        continue
+                    except requests.exceptions.ReadTimeout:
+                        print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                        continue
+                    except binance.exceptions.BinanceAPIException:
+                        print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                        continue
+                except Exception as err:
+                    print(err)
+                    with open("log.txt", "a") as f:
+                        f.write("ERRORE PRIME LINEE " + str(err) + "\n")
+                        f.close()
+                    continue
+                try:
+                    asks_data = resp_bnb['asks'][0]
+                    asks_bnb = round(float(resp_bnb['asks'][0][0]), 8)
+                except TypeError:
+                    print(f"{Fore.RED}[#] ERROR WHILE FETCHING DATA 68 [typeError - nonetype]{Style.RESET_ALL}")
+                    continue
+                print("SELL PRICE %s, SELL DEPTH %s " % (asks_bnb, asks_data[1]))
+                print("PREZZO DA UTILIZZARE PER SELLARE", str(asks_bnb))
+                try:
+                    howmuch = int(j['sell'])
+                    while True:
+                        try:
+                            order_id_sell = \
+                            client.order_limit_sell(symbol=pair, quantity=howmuch, price=float_to_str(asks_bnb))[
+                                "orderId"]
+
+                            time.sleep(2)
+                            break
+                        except requests.exceptions.ConnectionError:
+                            pass
+                        except urllib3.exceptions.ProtocolError:
+                            pass
+                    dase = asks_bnb
+                    with open("log.txt", "a") as f:
+                        f.write("INSERISCO SELL " + str(dase) + "\n")
+                        f.close()
+                    print(order_id_sell)
+                    print("ordine messso")
+                except Exception as err:
+                    print("ERRORE NEL PIAZZARE SELL, REINIZIO DACCAPO", str(datetime.datetime.utcnow()) + str(err))
+                    with open("log.txt", "a") as f:
+                        f.write("ERRORE NEL PIAZZARE SELL, REINIZIO DACCAPO " + str(datetime.datetime.utcnow()) + str(
+                            err) + "\n")
+                        f.close()
+                    continue
+                time.sleep(5)
+                print("ORDINE SELL PIAZZATO", order_id_sell)
+                creato = int(time.time())
+                with open("log.txt", "a") as f:
+                    f.write("SELL PIAZZATO " + str(datetime.datetime.utcnow()) + "\n")
+                    f.close()
+            #           SELL PIAZZATO, PROCEDO A VERIFICARE SE IL SELL E' ANCORA APERTO
+            ordine_in_corso = True
+            while ordine_in_corso:
+                print("ATTENDO SELL FILL")
+                try:
+                    resp = client.get_order(symbol=pair, orderId=order_id_sell)["status"]
+                    print("ciao", resp)
+                    if not (resp == "NEW" or resp == "PARTIALLY_FILLED"):
+                        ordine_in_corso = False
+                except Exception as err:
+                    print("ERRORE CONNESSIONE CON KUCOIN", err)
+                    with open("log.txt", "w") as f:
+                        f.write("ERRORE CONNESSIONE CON KUCOIN " + str(datetime.datetime.utcnow()) + str(err) + "\n")
+                        f.close()
+                    continue
+                print("tempo", str((int(time.time()) - creato > 180)))
+                try:
+                    resp_bnb = client.get_order_book(symbol=pair, limit=5)
+                except requests.exceptions.ConnectionError:
+                    print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                    continue
+                except requests.exceptions.ReadTimeout:
+                    print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                    continue
+                except binance.exceptions.BinanceAPIException:
+                    print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                    continue
+                part = asks_bnb
+                try:
+                    client.get_asset_balance(asset="TRX")
+                    asks_data = resp_bnb['asks'][0]
+                    asks_bnb = round(float(resp_bnb['asks'][0][0]), 8)
+                except TypeError:
+                    print(f"{Fore.RED}[#] ERROR WHILE FETCHING DATA 138 [typeError - nonetype]{Style.RESET_ALL}")
+                    continue
+                if (int(time.time()) - creato > 180) and not (asks_bnb == part):
+                    try:
+                        client.cancel_order(symbol=pair,orderId=order_id_sell)
+                        time.sleep(2)
+                        partially=partially+float(client.get_order(symbol=pair,orderId=order_id_sell)['executedQty'])
+                        try:
+                            client.cancel_order(symbol=pair, orderId=order_id_sell)
+                        except exceptions.BinanceAPIException as err:
+                            print(err)
+                            with open("log.txt", "a") as f:
+                                f.write("ERRORE RICANCELLANDO" + str(datetime.datetime.utcnow()) + str(err) + "\n")
+                                f.close()
+                        except Exception as err:
+                            print(err)
+                            with open("log.txt", "a") as f:
+                                f.write("ERRORE RICANCELLANDO" + str(datetime.datetime.utcnow()) + str(err) + "\n")
+                                f.close()
+                            pass
+                        alt_balance =  float(client.get_asset_balance(asset="TRX")["free"])
+                        btc_balance = float(client.get_asset_balance(asset="BNB")["free"])
+                        howmuch = float(j['sell']) # max(round(btc_balance * sell_perc), sell)
+                        while True:
+                            try:
+                                order_id_sell=client.order_limit_sell(symbol=pair,quantity=howmuch,price=float_to_str(asks_bnb))["orderId"]
+                                time.sleep(2)
+                                break
+                            except requests.exceptions.ConnectionError:
+                                pass
+                            except urllib3.exceptions.ProtocolError:
+                                pass
+                        dase = asks_bnb
+                        creato = int(time.time())
+                        time.sleep(7)
+                    except Exception as err:
+                        print(err)
+                        with open("log.txt", "a") as f:
+                            f.write("ERRORE TRA 107 E 127" +str(datetime.datetime.utcnow()) + str(err)+ "\n")
+                            f.close()
+                        pass
+                print("ATTENDO IL SELL")
+                with open("log.txt", "a") as f:
+                    f.write("ATTENDO IL SELL" + "\n")
+                    f.close()
+                resp = client.get_order(symbol=pair, orderId=order_id_sell)["status"]
+                time.sleep(10)
+            #           ORDINE SELL FILLATO O CANCELLATO, PROCEDO A METTERE BUY
+            print("FILLATOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO")
+            alt_balance = d["bnbtrx"] = float(client.get_asset_balance(asset="TRX")["free"])
+            btc_balance = d["bnbbnb"] = float(client.get_asset_balance(asset="BNB")["free"])
+            print("ALT BALANCE: ", alt_balance)
+            print("BTC BALANCE: ", btc_balance)
+            try:
+                resp_bnb = client.get_order_book(symbol=pair, limit=5)
+            except requests.exceptions.ConnectionError:
+                print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                continue
+            except requests.exceptions.ReadTimeout:
+                print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                continue
+            except binance.exceptions.BinanceAPIException:
+                print(f"{Fore.RED}[ERR] CHECK INTERNET CONNECTION{Style.RESET_ALL}")
+                continue
+            try:
+                bids_bnb = round(float(resp_bnb['bids'][0][0]), 8)
+            except TypeError:
+                print(f"{Fore.RED}[#] ERROR WHILE FETCHING DATA 205 [typeError - nonetype]{Style.RESET_ALL}")
+                continue
+            with open("log.txt", "a") as f:
+                f.write("INFO CONTO BTC\n")
+                f.close()
+                with open("log.txt", "a") as f:
+                    f.write("INSERISCO BUY " + float_to_str(round(dase - float(j['spread']), 8)) + "\n")
+                    f.close()
+            while True:
+                try:
+                    howmuch=howmuch+partially
+                    order_id_buy = \
+                    client.order_limit_buy(symbol=pair, quantity=howmuch, price=float_to_str(round(dase - float(j['spread']), 8)))["orderId"]
+                    time.sleep(2)
+                    partially=0
+                    break
+                except requests.exceptions.ConnectionError:
+                    pass
+                except urllib3.exceptions.ProtocolError:
+                    pass
+            with open("log.txt", "a") as f:
+                f.write("ORDINE BUY CREATO" + str(order_id_buy) + "\n")
+                f.close()
+            time.sleep(6)
+            try:
+                resp = client.get_order(symbol=pair, orderId=order_id_buy)["status"]
+                if resp == "NEW" or resp == "PARTIALLY_FILLED" or resp== "FILLED":
+                    print("ok, ordine buy creato")
+                    time.sleep(5)
+            except Exception as err:
+                with open("log.txt", "a") as f:
+                    f.write("ERRORE CREAZIONE ORDINE BUY " + str(datetime.datetime.utcnow()) + str(err) + "\n")
+                    f.close()
+                print(float_to_str(round(float(dase) - float(j['spread']), 8)))
+                while True:
+                    try:
+                        order_id_buy = \
+                            client.order_limit_buy(symbol=pair, quantity=howmuch,
+                                                    price=float_to_str(round(dase - float(j['spread']), 8)))["orderId"]
+                        break
+                    except requests.exceptions.ConnectionError:
+                        pass
+                    except urllib3.exceptions.ProtocolError:
+                        pass
+            creato = int(time.time())
+            while client.get_order(symbol=pair, orderId=order_id_buy)["status"] == "NEW":
+                print("Attendo")
+                print(client.get_order(symbol=pair, orderId=order_id_buy)["status"])
+                time.sleep(2)
+                print(int(time.time()) - creato)
+                if int(time.time()) - creato > int(j['buysellinterval']):
+                    break
+        except Exception as err:
+            with open("log.txt", "a") as f:
+                f.write("ERRORE GENERALE " + str(err) + "\n")
+                f.close()
+        except requests.exceptions.ConnectionError:
+            pass
+        except KeyboardInterrupt:
+            exit(0)
+
+
+ctx = decimal.Context()
+
+# 20 digits should be enough for everyone :D
+ctx.prec = 8
+
+
+def float_to_str(f):
+    """
+    Convert the given float to a string,
+    without resorting to scientific notation
+    """
+    d1 = ctx.create_decimal(repr(f))
+    return format(d1, 'f')
+
+def scostamento():
+    return 0
+
+
+if __name__ == '__main__':
+    main()
